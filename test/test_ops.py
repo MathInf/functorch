@@ -493,8 +493,9 @@ class TestOperators(TestCase):
                 result_vjps, _ = tree_flatten(result_vjps)
                 return (*result, *result_vjps)
 
+            
             for loop_out, batched_out in \
-                    get_fallback_and_vmap_exhaustive(vjp_of_vjp, args_and_cotangents, {}):
+                    get_fallback_and_vmap_exhaustive(vjp_of_vjp, args_and_cotangents, {}, op_info=op):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
     vmapvjp_fail = vjp_fail.union({
         # The following are not bugs and are expected behavior
@@ -571,7 +572,7 @@ class TestOperators(TestCase):
         for sample in samples:
             cotangents = get_sample_cotangents(op, sample)
             fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}):
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, op_info=op):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
     # There are several variations we care about
@@ -669,7 +670,7 @@ class TestOperators(TestCase):
             kwarg_values = sample.kwargs
             args = tuple([*arg_values, *kwarg_values])
             fn, args = get_jvp_variant(op, sample)
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, bdims=(0,)):
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, op_info=op, bdims=(0,)):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
@@ -738,7 +739,7 @@ class TestOperators(TestCase):
             kwarg_values = sample.kwargs
             args = tuple([*arg_values, *kwarg_values])
             fn, args = get_jvp_variant_primals_tangents(op, sample)
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}):
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, op_info=op):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -850,12 +851,12 @@ class TestOperators(TestCase):
                 cotangents = get_sample_cotangents(op, sample)
                 fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
                 for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
-                        fn, args, {}, compute_loop_out=False):
+                        fn, args, {}, op_info=op, compute_loop_out=False):
                     pass
                 for a_op in op.aliases:
                     fn, args = get_vjp_fn_and_args_with_cotangents(a_op, sample, cotangents)
                     for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
-                            fn, args, {}, compute_loop_out=False):
+                            fn, args, {}, op_info=op, compute_loop_out=False):
                         pass
 
         check_vmap_fallback(self, test, op, dry_run=False)
