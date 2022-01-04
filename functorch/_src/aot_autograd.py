@@ -1,4 +1,5 @@
 import os
+import math
 import torch
 import torch.nn as nn
 from functorch import make_functional_with_buffers, make_fx
@@ -22,7 +23,7 @@ pytree._register_pytree_node(immutable_collections.immutable_dict, lambda x: (li
 aten = torch.ops.aten
 
 
-def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph", clear_meta = True):
+def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph", clear_meta=True):
     if clear_meta:
         traced = copy.deepcopy(traced)
     for node in traced.graph.nodes:
@@ -162,11 +163,14 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
     new_graph.lint()
     return new_graph
 
+
 def _is_primal(node):
     return node.op == "placeholder" and "tangents" not in node.target
 
+
 def _is_tangent(node):
     return node.op == "placeholder" and "tangents" in node.target
+
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule):
     num_fwd_outputs = joint_module._out_spec.children_specs[0].num_leaves
@@ -174,6 +178,7 @@ def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule):
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
     return fwd_outputs, bwd_outputs
+
 
 def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
@@ -214,7 +219,7 @@ def prod(x):
         s *= i
     return s
 
-import math
+
 def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inputs):
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -229,8 +234,6 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
     except ImportError:
         raise RuntimeError("Need networkx installed to perform smart recomputation heuristics")
     # draw_graph(joint_module, "joint.svg")
-    primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-    tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
     full_bw_graph = joint_module.graph
 
     nx_graph = nx.DiGraph()
@@ -250,14 +253,13 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
     misc_ops = [aten.to, aten.type_as]
 
     # Not used by default since NVFuser can't fuse view ops
-    view_ops = [aten.expand, aten.clone, aten.transpose, aten.t, aten.view, aten._unsafe_view, aten.permute, aten.transpose, aten.t, aten._reshape_alias, aten.squeeze, aten.unsqueeze, aten.reshape]
+    # view_ops = [aten.expand, aten.clone, aten.transpose, aten.t, aten.view, aten._unsafe_view, aten.permute, aten.transpose, aten.t, aten._reshape_alias, aten.squeeze, aten.unsqueeze, aten.reshape]
 
     recomputable_ops = set(
-        pointwise_ops 
+        pointwise_ops
         + reduction_ops
         + norm_ops
         + misc_ops
-        # + view_ops
     )
 
     print("recomputable ops", set([i.target for i in full_bw_graph.nodes if i.op == 'call_function']) & set(recomputable_ops))
@@ -272,8 +274,8 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
 
         if node.op == 'call_function' and node.target not in recomputable_ops:
             nx_graph.add_edge("source", node.name+"_in", capacity=math.inf)
-        
-        if not 'tensor_meta' in node.meta:
+
+        if 'tensor_meta' not in node.meta:
             weight = math.inf
         else:
             mem_sz = prod(node.meta['tensor_meta'].shape)
@@ -281,7 +283,6 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
                 weight = mem_sz
             else:
                 weight = mem_sz * 2
-
 
         nx_graph.add_edge(node.name+"_in", node.name+"_out", capacity=weight)
         for user in node.users:
@@ -300,11 +301,10 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
         cut_nodes.add(node_name)
     # print(len(cut_nodes), sorted(list(cut_nodes)))
 
-
     saved_values = [name_to_node[node] for node in cut_nodes]
 
-
     return _extract_fwd_bwd_modules(joint_module, saved_values)
+
 
 def create_joint_forward_backward(fn):
     def joint_forward_backward(primals, tangents):
@@ -406,6 +406,7 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, de
 class _CompileCache(CompileCache):
     pass
 
+
 # using a C++-based pytree reduces the overhead by about 50%
 try:
     import tree
@@ -481,8 +482,6 @@ def compiled_function(
             compile_cache.insert(
                 fn_id, num_args, hasher_type, cached_res, *flattened_args
             )
-
-
 
         cached_fn, out_spec = cached_res
         out = cached_fn(*flattened_args)
